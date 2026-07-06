@@ -462,6 +462,17 @@ video {
 
 /* Custom Additions for Script Editor & Dropdowns */
 
+.settings-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+@media (max-width: 640px) {
+  .settings-row { grid-template-columns: 1fr; }
+}
+
 .input-group {
   margin-bottom: 18px;
 }

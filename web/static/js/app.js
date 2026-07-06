@@ -5,6 +5,7 @@ const generateBtn = document.getElementById("generateBtn");
 const customizeBtn = document.getElementById("customizeBtn");
 const useOnlineImagesEl = document.getElementById("useOnlineImages");
 const musicGenreEl = document.getElementById("musicGenre");
+const ttsVoiceEl = document.getElementById("ttsVoice");
 const scriptEditorSection = document.getElementById("scriptEditorSection");
 const editTitle = document.getElementById("editTitle");
 const editHook = document.getElementById("editHook");
@@ -159,6 +160,7 @@ async function startGeneration(event) {
         prompt,
         use_online_images: useOnlineImagesEl.checked,
         music_genre: musicGenreEl.value,
+        tts_voice: ttsVoiceEl.value,
       }),
     });
 
@@ -307,6 +309,7 @@ async function renderEditedScript() {
         prompt: promptEl.value.trim() || title,
         use_online_images: useOnlineImagesEl.checked,
         music_genre: musicGenreEl.value,
+        tts_voice: ttsVoiceEl.value,
         script: updatedScript,
       }),
     });
@@ -401,16 +404,16 @@ async function checkHealth() {
     const data = await response.json();
 
     if (!data.ffmpeg) {
-      systemStatus.textContent = "ffmpeg missing — install required";
+      systemStatus.textContent = "ffmpeg nahi mila — install karo";
       systemStatus.className = "status-pill warn";
       return;
     }
 
     if (data.ollama) {
-      systemStatus.textContent = "Ready · Ollama + free TTS/images";
+      systemStatus.textContent = "✅ Ready · Pollinations GPT-4o + Hindi TTS";
       systemStatus.className = "status-pill ok";
     } else {
-      systemStatus.textContent = "Ready · template scripts (install Ollama for smarter scripts)";
+      systemStatus.textContent = "✅ Ready · Pollinations GPT-4o + Hindi TTS";
       systemStatus.className = "status-pill ok";
     }
   } catch {

@@ -23,6 +23,7 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=3, max_length=500)
     use_online_images: bool = True
     music_genre: str = "none"
+    tts_voice: str = "hi-IN-MadhurNeural"
     script: ShortScript | None = None
 
 
@@ -39,6 +40,7 @@ async def _process_job(
     prompt: str,
     use_online_images: bool,
     music_genre: str,
+    tts_voice: str,
     script_data: ShortScript | None,
 ) -> None:
     job = job_store.get(job_id)
@@ -46,8 +48,11 @@ async def _process_job(
         return
 
     settings = Settings.from_env()
+    # Override TTS voice from user selection
+    import dataclasses
+    settings = dataclasses.replace(settings, tts_voice=tts_voice)
     job.status = JobStatus.RUNNING
-    job.message = "Generation started..."
+    job.message = "Shuru ho raha hai..."
 
     def on_progress(progress: int, message: str) -> None:
         job.progress = progress
@@ -119,6 +124,7 @@ async def generate_short(
         prompt,
         body.use_online_images,
         body.music_genre,
+        body.tts_voice,
         body.script,
     )
     return GenerateResponse(job_id=job.id)

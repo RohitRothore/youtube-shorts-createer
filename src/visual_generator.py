@@ -10,9 +10,19 @@ from src.config import Settings
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    # Prioritize NotoSans (best for Hinglish/mixed text) over Devanagari-specific fonts
     candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        # Noto Sans — best for Hinglish (Latin text with Hindi support)
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        # Noto Sans Devanagari — for full Devanagari support
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        # Liberation Sans — excellent Latin support
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        # Lohit Devanagari — common on Ubuntu/Fedora
+        "/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf",
+        "/usr/share/fonts/truetype/lohit/Lohit-Devanagari.ttf",
+        # DejaVu fallback
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "/System/Library/Fonts/Supplemental/Arial.ttf",
     ]
     for path in candidates:
@@ -177,11 +187,16 @@ def add_text_overlay(
     font_size = max(56, width // 16)
     font = _font(font_size, bold=True)
 
-    # Convert text to uppercase for impact
-    text_upper = text.strip().upper()
+    # Keep Hinglish text as-is for better rendering
+    # (mixing uppercase with Hinglish can cause rendering issues)
+    text_display = text.strip()
+    
+    # Only uppercase if it's primarily English/Latin
+    if text_display and all(ord(c) < 128 or c.isspace() for c in text_display):
+        text_display = text_display.upper()
 
     margin = width // 10
-    lines = _wrap_text(text_upper, font, width - margin * 2)
+    lines = _wrap_text(text_display, font, width - margin * 2)
     
     # Calculate line heights and total height
     line_heights = []

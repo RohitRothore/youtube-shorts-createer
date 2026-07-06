@@ -27,7 +27,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         return cls(
             ollama_url=os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/"),
-            ollama_model=os.getenv("OLLAMA_MODEL", "llama2"),
+            ollama_model=os.getenv("OLLAMA_MODEL", "llama3.2"),
             tts_voice=os.getenv("TTS_VOICE", "en-US-ChristopherNeural"),
             video_width=int(os.getenv("VIDEO_WIDTH", "1080")),
             video_height=int(os.getenv("VIDEO_HEIGHT", "1920")),

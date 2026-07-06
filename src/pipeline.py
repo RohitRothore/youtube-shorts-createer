@@ -124,6 +124,7 @@ async def run_pipeline(
     music_genre: str = "none",
     script_data: ShortScript | None = None,
 ) -> GenerationResult:
+    import asyncio as _asyncio
     settings = settings or Settings.from_env()
     sources: dict[str, str] = {}
 
@@ -136,12 +137,12 @@ async def run_pipeline(
     scenes_dir = work_dir / "scenes"
     clips_dir = work_dir / "clips"
 
-    report(5, "Starting generation...")
+    report(5, "Shuru ho raha hai...")
 
     if script_data:
         script = script_data
         script_source = "custom"
-        report(20, f"Using customized script: {script.title}")
+        report(20, f"Custom script: {script.title}")
     else:
         script, script_source = await generate_script(
             settings,
@@ -149,25 +150,61 @@ async def run_pipeline(
             on_status=lambda msg: report(10, msg),
         )
     sources["script"] = script_source
-    report(20, f"Script ready: {script.title}")
+    report(20, f"Script taiyaar: {script.title}")
 
-    total_steps = len(script.scenes) + 2
     clip_paths: list[Path] = []
 
-    report(25, "Creating hook scene...")
-    hook_image, hook_img_src = await generate_image(
+    # -----------------------------------------------------------------------
+    # PARALLEL generation: fetch all images + all audio simultaneously
+    # This is the single biggest speed win (~3x faster than sequential)
+    # -----------------------------------------------------------------------
+    report(25, "Images aur audio ek saath ban rahe hain...")
+
+    # Build all image + audio coroutines for hook + scenes
+    all_image_coros = []
+    all_audio_coros = []
+
+    # Hook
+    all_image_coros.append(generate_image(
         settings,
         script.scenes[0].visual_prompt,
         script.title,
         scenes_dir / "hook_image.png",
         scene_index=0,
         use_online_images=use_online_images,
-    )
-    sources["hook_image"] = hook_img_src
+    ))
+    all_audio_coros.append(generate_speech(settings, script.hook, scenes_dir / "hook_audio.mp3"))
 
-    hook_audio = await generate_speech(
-        settings, script.hook, scenes_dir / "hook_audio.mp3"
+    # Scenes
+    for index, scene in enumerate(script.scenes):
+        all_image_coros.append(generate_image(
+            settings,
+            scene.visual_prompt,
+            scene.on_screen_text,
+            scenes_dir / f"{index:02d}_image.png",
+            scene_index=index,
+            use_online_images=use_online_images,
+        ))
+        all_audio_coros.append(generate_speech(
+            settings,
+            scene.narration,
+            scenes_dir / f"{index:02d}_audio.mp3",
+        ))
+
+    report(30, "Visuals aur awaaz tayaar ho rahe hain...")
+
+    # Run images and audios in parallel
+    image_results, audio_results = await _asyncio.gather(
+        _asyncio.gather(*all_image_coros),
+        _asyncio.gather(*all_audio_coros),
     )
+
+    report(65, "Clips render ho rahe hain...")
+
+    # Hook clip
+    hook_image, hook_img_src = image_results[0]
+    hook_audio = audio_results[0]
+    sources["hook_image"] = hook_img_src
     hook_clip = create_scene_clip(
         hook_image,
         hook_audio,
@@ -179,28 +216,13 @@ async def run_pipeline(
     )
     clip_paths.append(hook_clip)
 
+    # Scene clips (sequential — FFmpeg is CPU bound, parallelising would starve cores)
     for index, scene in enumerate(script.scenes):
-        base_progress = 25 + int((index + 1) / total_steps * 60)
-        report(base_progress, f"Scene {index + 1}/{len(script.scenes)}: generating image...")
-
-        image_path, img_src = await generate_image(
-            settings,
-            scene.visual_prompt,
-            scene.on_screen_text,
-            scenes_dir / f"{index:02d}_image.png",
-            scene_index=index,
-            use_online_images=use_online_images,
-        )
+        progress_pct = 65 + int((index + 1) / len(script.scenes) * 22)
+        report(progress_pct, f"Scene {index + 1}/{len(script.scenes)} render...")
+        image_path, img_src = image_results[index + 1]
+        audio_path = audio_results[index + 1]
         sources[f"scene_{index + 1}_image"] = img_src
-
-        report(base_progress + 3, f"Scene {index + 1}/{len(script.scenes)}: generating voice...")
-        audio_path = await generate_speech(
-            settings,
-            scene.narration,
-            scenes_dir / f"{index:02d}_audio.mp3",
-        )
-
-        report(base_progress + 6, f"Scene {index + 1}/{len(script.scenes)}: rendering clip...")
         clip_path = create_scene_clip(
             image_path,
             audio_path,
@@ -212,8 +234,9 @@ async def run_pipeline(
         )
         clip_paths.append(clip_path)
 
-    report(90, "Merging all scenes into final video...")
-    safe_title = re.sub(r"[^\w\- ]", "", script.title).strip().replace(" ", "-").lower()
+    report(90, "Sabhi scenes jodi jaa rahi hain...")
+    # Safe ASCII slug for the file path (title may contain Devanagari)
+    safe_title = re.sub(r"[^a-zA-Z0-9\-]", "-", _slugify(prompt[:40]))
 
     # Mix background music if requested
     if music_genre != "none":
@@ -257,9 +280,9 @@ async def run_pipeline(
         ],
     }
     save_metadata(work_dir, metadata)
-    sources["tts"] = "edge-tts"
+    sources["tts"] = "edge-tts (Hinglish)"
 
-    report(100, "Your YouTube Short is ready!")
+    report(100, "🎬 Aapka YouTube Short tayaar hai!")
     return GenerationResult(
         video_path=final_path,
         script=script,
