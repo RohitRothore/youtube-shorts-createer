@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from typing import Callable
@@ -42,45 +43,60 @@ Return ONLY valid JSON (no markdown, no explanation):
 }"""
 
 
-def _build_hindi_fallback_script(prompt: str) -> ShortScript:
+def _extract_topic(prompt: str) -> str:
     topic = prompt.strip().rstrip("।.")
-    # Detect if prompt is already Hindi, otherwise wrap it
-    is_hindi = any('\u0900' <= c <= '\u097F' for c in prompt)
-    topic_hindi = topic if is_hindi else topic
+    if not topic:
+        return "shorts"
 
-    hook = f"Ruko! {topic_hindi} ke baare mein ye baat tum nahi jaante!"
-    title = f"{topic_hindi} - Jaankar hairaan ho jaoge!"
+    match = re.search(
+        r"(?i)(?:\b(?:interesting\s+facts\s+about|facts\s+about|fact\s+about|about|ke\s+baare\s+mein)\b)\s*(.*)$",
+        topic,
+    )
+    if match:
+        extracted = match.group(1).strip()
+        if extracted:
+            topic = extracted
 
-    templates = [
+    cleaned = re.sub(r"[^a-zA-Z0-9\u0900-\u097F ]+", "", topic)
+    cleaned = re.sub(r"\b(interesting|facts|fact|about|ke|baare|mein)\b", "", cleaned, flags=re.IGNORECASE).strip()
+    return cleaned or "shorts"
+
+
+def _build_hindi_fallback_script(prompt: str) -> ShortScript:
+    safe_topic = _extract_topic(prompt)
+    hook = f"Ruko! {safe_topic} ke baare mein 5 aise facts jo aap soch bhi nahi sakte."
+    title = f"{safe_topic} ke 5 chonkane wale facts"
+
+    scene_templates = [
         (
-            f"Sach mein {topic_hindi} ke baare mein aisi baatein hain jo zyadatar log nahi jaante.",
-            f"dramatic wide angle shot related to {topic}, Indian setting, golden hour, cinematic, 9:16 vertical, photorealistic, no text",
-            "Sach jaante ho?",
+            f"Pehla fact: {safe_topic} se judi ek choti si baat jo sabko hairaan kar degi.",
+            f"realistic photo of a modern Indian city street scene about {safe_topic}, cinematic 9:16, warm lighting, photorealistic, no text",
+            "Pehla fact",
         ),
         (
-            f"Pehli baat - {topic_hindi} itni interesting hai ki tum surprise ho jaoge.",
-            f"close-up dramatic reveal shot about {topic}, vibrant Indian colors, realistic photography, portrait orientation, no text",
-            "Number ek!",
+            f"Doosra fact: yeh baat sabko nahi pata hoti, lekin iska asar har jagah hota hai.",
+            f"cinematic portrait of a young Indian person reflecting on {safe_topic}, vertical 9:16, realistic photography, no text",
+            "Doosra fact",
         ),
         (
-            f"Aur isse bhi zyada chonkane wali baat - {topic_hindi} ka asar hum sabki zindagi pe padta hai.",
-            f"epic cinematic scene about {topic}, India, people reacting with amazement, golden light, 9:16, no text",
-            "Socho zara!",
+            f"Teesra fact: sach yeh hai ki {safe_topic} bahut zyada important hai, aur log ise ignore karte hain.",
+            f"realistic photo of Indian people reacting in surprise to {safe_topic}, dramatic lighting, 9:16 vertical, no text",
+            "Sach bataun?",
         ),
         (
-            f"Experts bhi maante hain ki {topic_hindi} ko samajhna bahut zaroori hai.",
-            f"inspiring Indian expert or teacher explaining {topic}, studio background, professional lighting, vertical frame, no text",
-            "Dhyan do!",
+            f"Chautha fact: experts kehte hain ki {safe_topic} ko samajhna har ek ke liye useful hai.",
+            f"cinematic scene of an Indian expert explaining {safe_topic} in a modern studio, vertical 9:16, photorealistic, no text",
+            "Dhyan do",
         ),
         (
-            f"To doston, ab tum {topic_hindi} ke baare mein jaan gaye. Aise hi videos ke liye follow karo!",
-            f"cheerful young Indian people celebrating, vibrant colors, energetic atmosphere, 9:16 cinematic, no text",
-            "Follow karo!",
+            f"Ant mein: ab aap {safe_topic} ke baare mein kuch naya jaante ho. Share karna mat bhoolna.",
+            f"vibrant celebration image of young Indian creators sharing a short video, 9:16, cinematic, no text",
+            "Share karo",
         ),
     ]
 
-    scenes = [Scene(narration=n, visual_prompt=v, on_screen_text=t) for n, v, t in templates]
-    topic_slug = re.sub(r"[^a-zA-Z0-9\u0900-\u097F]", "", topic.split()[0])[:20] or "shorts"
+    scenes = [Scene(narration=n, visual_prompt=v, on_screen_text=t) for n, v, t in scene_templates]
+    topic_slug = re.sub(r"[^a-zA-Z0-9\u0900-\u097F]", "", safe_topic.split()[0])[:20] or "shorts"
     hashtags = [topic_slug, "shorts", "viral", "india", "hinglishshorts"]
     return ShortScript(title=title, hook=hook, scenes=scenes, hashtags=hashtags)
 
@@ -117,23 +133,44 @@ async def _try_pollinations(prompt: str, on_status: Callable[[str], None] | None
         "temperature": 0.9,
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            response = await client.post(POLLINATIONS_API, json=payload)
-            if response.status_code != 200:
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        for attempt in range(1, 4):
+            try:
+                response = await client.post(POLLINATIONS_API, json=payload)
+                if response.status_code == 200:
+                    data = response.json()
+                    raw = data["choices"][0]["message"]["content"]
+                    if not raw:
+                        return None
+                    parsed = _extract_json(raw)
+                    script = ShortScript.model_validate(parsed)
+                    if len(script.scenes) < 3:
+                        return None
+                    return script
+
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    wait = int(retry_after) if retry_after and retry_after.isdigit() else attempt * 3
+                    if on_status:
+                        on_status(f"Queue full at Pollinations, retrying in {wait}s...")
+                    await asyncio.sleep(wait)
+                    continue
+
+                if on_status:
+                    on_status(f"Pollinations returned {response.status_code}, fallback kar rahe hain...")
                 return None
-            data = response.json()
-            raw = data["choices"][0]["message"]["content"]
-            if not raw:
+            except (httpx.ReadTimeout, httpx.ConnectError, httpx.RequestError) as exc:
+                if attempt < 3:
+                    if on_status:
+                        on_status(f"Pollinations request failed, retrying... ({attempt}/3)")
+                    await asyncio.sleep(attempt * 2)
+                    continue
+                print(f"Pollinations API error: {exc}")
                 return None
-            parsed = _extract_json(raw)
-            script = ShortScript.model_validate(parsed)
-            if len(script.scenes) < 3:
+            except Exception as exc:
+                print(f"Pollinations API error: {exc}")
                 return None
-            return script
-    except Exception as e:
-        print(f"Pollinations API error: {e}")
-        return None
+    return None
 
 
 async def _try_ollama(settings: Settings, prompt: str) -> ShortScript | None:

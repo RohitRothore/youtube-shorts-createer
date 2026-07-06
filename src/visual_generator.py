@@ -98,38 +98,41 @@ def create_slide_image(
     draw = ImageDraw.Draw(img)
     _draw_decorations(draw, w, h, accent)
 
-    title_font = _font(max(52, w // 14), bold=True)
-    sub_font = _font(max(32, w // 26))
-
-    headline = on_screen_text.strip() or visual_prompt.split(",")[0][:40]
+    # Add a clean headline section for fallback visuals.
+    title_font = _font(max(56, w // 20), bold=True)
+    subtitle_font = _font(max(30, w // 32))
+    headline = on_screen_text.strip() or f"Scene {scene_index + 1}"
+    headline = headline[:30]
     lines = _wrap_text(headline, title_font, w - 120)
-    y = h // 2 - len(lines) * 40
+
+    text_block_height = sum(_font(max(56, w // 20), bold=True).getbbox(line)[3] - _font(max(56, w // 20), bold=True).getbbox(line)[1] + 14 for line in lines)
+    top = h // 4 - text_block_height // 2
+
+    box_margin = 40
+    box_top = top - 30
+    box_bottom = top + text_block_height + 30
+    draw.rounded_rectangle(
+        (box_margin, box_top, w - box_margin, box_bottom),
+        radius=32,
+        fill=(0, 0, 0, 150),
+    )
+
+    y = top
     for line in lines:
         bbox = title_font.getbbox(line)
         tw = bbox[2] - bbox[0]
         draw.text(((w - tw) // 2, y), line, font=title_font, fill=(255, 255, 255))
-        y += bbox[3] - bbox[1] + 12
+        y += bbox[3] - bbox[1] + 14
 
-    badge = f"Scene {scene_index + 1}"
-    badge_font = _font(28, bold=True)
-    pad = 20
-    bb = badge_font.getbbox(badge)
-    bw, bh = bb[2] - bb[0] + pad * 2, bb[3] - bb[1] + pad * 2
-    draw.rounded_rectangle(
-        (w // 2 - bw // 2, h - bh - 80, w // 2 + bw // 2, h - 80),
-        radius=16,
-        fill=(*accent,),
-    )
-    draw.text((w // 2, h - 80 - bh // 2), badge, font=badge_font, fill=(255, 255, 255), anchor="mm")
-
-    snippet = visual_prompt[:90] + ("..." if len(visual_prompt) > 90 else "")
-    sub_lines = _wrap_text(snippet, sub_font, w - 160)
-    sy = h // 2 + 40
-    for line in sub_lines[:3]:
-        bbox = sub_font.getbbox(line)
-        tw = bbox[2] - bbox[0]
-        draw.text(((w - tw) // 2, sy), line, font=sub_font, fill=(220, 220, 230))
-        sy += bbox[3] - bbox[1] + 8
+    if visual_prompt:
+        prompt_text = visual_prompt[:90] + ("..." if len(visual_prompt) > 90 else "")
+        prompt_lines = _wrap_text(prompt_text, subtitle_font, w - 120)
+        y += 12
+        for line in prompt_lines[:2]:
+            bbox = subtitle_font.getbbox(line)
+            tw = bbox[2] - bbox[0]
+            draw.text(((w - tw) // 2, y), line, font=subtitle_font, fill=(230, 230, 230))
+            y += bbox[3] - bbox[1] + 10
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path, format="PNG")
@@ -142,11 +145,11 @@ async def fetch_pollinations_image(
     output_path: Path,
 ) -> bool:
     encoded = quote(
-        f"{prompt}. Vertical 9:16 cinematic photo, high quality, no text, no watermark."
+        f"{prompt}. Ultra realistic cinematic photo, vertical 9:16, detailed subject, vibrant colors, sharp focus, no text, no watermark."
     )
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width={settings.video_width}&height={settings.video_height}&nologo=true&seed={hash(prompt) % 99999}"
+        f"?width={settings.video_width}&height={settings.video_height}&nologo=true&seed={abs(hash(prompt)) % 999999}"
     )
 
     try:
@@ -182,48 +185,47 @@ def add_text_overlay(
     img = Image.open(image_path).convert("RGBA")
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    
-    # Premium large bold font
-    font_size = max(56, width // 16)
-    font = _font(font_size, bold=True)
 
-    # Keep Hinglish text as-is for better rendering
-    # (mixing uppercase with Hinglish can cause rendering issues)
+    font_size = max(48, width // 18)
+    font = _font(font_size, bold=True)
     text_display = text.strip()
-    
-    # Only uppercase if it's primarily English/Latin
     if text_display and all(ord(c) < 128 or c.isspace() for c in text_display):
         text_display = text_display.upper()
 
     margin = width // 10
-    lines = _wrap_text(text_display, font, width - margin * 2)
-    
-    # Calculate line heights and total height
-    line_heights = []
-    for line in lines:
-        bbox = font.getbbox(line)
-        line_heights.append(bbox[3] - bbox[1])
-    
-    total_h = sum(line_heights) + (len(lines) - 1) * 12
-    
-    # Position in the sweet spot (60% down the screen)
-    y = int(height * 0.60) - total_h // 2
+    max_width = width - margin * 2
+    lines = _wrap_text(text_display, font, max_width)
+    if len(lines) > 2:
+        smaller_font = _font(max(40, width // 20), bold=True)
+        lines = _wrap_text(text_display, smaller_font, max_width)
+        font = smaller_font
+    lines = lines[:2]
 
+    line_heights = [font.getbbox(line)[3] - font.getbbox(line)[1] for line in lines]
+    total_h = sum(line_heights) + (len(lines) - 1) * 10
+
+    box_top = height - total_h - 140
+    box_bottom = height - 60
+    draw.rounded_rectangle(
+        (margin - 16, box_top - 16, width - margin + 16, box_bottom + 16),
+        radius=32,
+        fill=(0, 0, 0, 190),
+    )
+
+    y = box_top
     for i, line in enumerate(lines):
         bbox = font.getbbox(line)
         lw = bbox[2] - bbox[0]
-        # Yellow accent for the last line, white for others
-        # Thick black outline for readability (stroke_width=6)
         fill_color = (255, 235, 59, 255) if i == len(lines) - 1 else (255, 255, 255, 255)
         draw.text(
             ((width - lw) // 2, y),
             line,
             font=font,
             fill=fill_color,
-            stroke_width=6,
+            stroke_width=4,
             stroke_fill=(0, 0, 0, 255),
         )
-        y += line_heights[i] + 12
+        y += line_heights[i] + 10
 
     combined = Image.alpha_composite(img, overlay).convert("RGB")
     output_path.parent.mkdir(parents=True, exist_ok=True)

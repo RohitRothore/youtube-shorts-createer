@@ -28,7 +28,7 @@ class Settings:
         return cls(
             ollama_url=os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/"),
             ollama_model=os.getenv("OLLAMA_MODEL", "llama3.2"),
-            tts_voice=os.getenv("TTS_VOICE", "en-US-ChristopherNeural"),
+            tts_voice=os.getenv("TTS_VOICE", "hi-IN-MadhurNeural"),
             video_width=int(os.getenv("VIDEO_WIDTH", "1080")),
             video_height=int(os.getenv("VIDEO_HEIGHT", "1920")),
             video_fps=int(os.getenv("VIDEO_FPS", "30")),

@@ -68,6 +68,10 @@ def create_scene_clip(
             str(audio_path),
             "-c:v",
             "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
             "-t",
             str(duration),
             "-pix_fmt",
@@ -76,7 +80,7 @@ def create_scene_clip(
             (
                 f"scale={w2}:{h2}:force_original_aspect_ratio=increase,"
                 f"crop={w2}:{h2},"
-                f"zoompan=z='min(zoom+0.001,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                f"zoompan=z='if(lte(zoom,1.08),zoom+0.0008,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
                 f"d={frames}:s={w2}x{h2}:fps={fps},"
                 f"scale={width}:{height}"
             ),
