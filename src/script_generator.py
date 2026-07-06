@@ -131,21 +131,71 @@ async def _try_pollinations(prompt: str, on_status: Callable[[str], None] | None
             {"role": "user", "content": f"Topic: {prompt}"},
         ],
         "temperature": 0.9,
+        # Reasoning-style backends (e.g. gpt-oss-20b) can spend most of the
+        # completion budget on a hidden `reasoning` field and never emit
+        # `content` if this is too low. Give it plenty of headroom.
+        "max_tokens": 3000,
     }
 
     async with httpx.AsyncClient(timeout=45.0) as client:
         for attempt in range(1, 4):
             try:
                 response = await client.post(POLLINATIONS_API, json=payload)
+                print("🚀 ~ _try_pollinations ~ response:", response)
+
                 if response.status_code == 200:
                     data = response.json()
-                    raw = data["choices"][0]["message"]["content"]
+                    print("🚀 ~ _try_pollinations ~ data:", data)
+
+                    try:
+                        choice = data["choices"][0]
+                        message = choice.get("message", {})
+                        finish_reason = choice.get("finish_reason")
+                    except (KeyError, IndexError, TypeError) as exc:
+                        print(f"Pollinations malformed response shape: {exc}")
+                        if on_status:
+                            on_status("Unexpected response shape, retrying...")
+                        if attempt < 3:
+                            await asyncio.sleep(attempt * 2)
+                            continue
+                        return None
+
+                    raw = message.get("content")
+
+                    # Some backends dump everything into `reasoning` and
+                    # truncate before ever writing `content`. Don't try to
+                    # parse `reasoning` as JSON — it's free-form chain of
+                    # thought, not structured output. Just retry.
                     if not raw:
+                        reason_note = " (hit token limit while reasoning)" if finish_reason == "length" else ""
+                        print(f"Pollinations returned empty content{reason_note}")
+                        if on_status:
+                            on_status(f"Empty response from model{reason_note}, retrying...")
+                        if attempt < 3:
+                            await asyncio.sleep(attempt * 2)
+                            continue
                         return None
-                    parsed = _extract_json(raw)
-                    script = ShortScript.model_validate(parsed)
+
+                    try:
+                        parsed = _extract_json(raw)
+                        script = ShortScript.model_validate(parsed)
+                    except (ValueError, json.JSONDecodeError) as exc:
+                        print(f"Pollinations JSON/validation error: {exc}")
+                        if on_status:
+                            on_status("Malformed script from model, retrying...")
+                        if attempt < 3:
+                            await asyncio.sleep(attempt * 2)
+                            continue
+                        return None
+
                     if len(script.scenes) < 3:
+                        if on_status:
+                            on_status("Incomplete script from model, retrying...")
+                        if attempt < 3:
+                            await asyncio.sleep(attempt * 2)
+                            continue
                         return None
+
                     return script
 
                 if response.status_code == 429:
@@ -159,6 +209,7 @@ async def _try_pollinations(prompt: str, on_status: Callable[[str], None] | None
                 if on_status:
                     on_status(f"Pollinations returned {response.status_code}, fallback kar rahe hain...")
                 return None
+
             except (httpx.ReadTimeout, httpx.ConnectError, httpx.RequestError) as exc:
                 if attempt < 3:
                     if on_status:
